@@ -1,247 +1,322 @@
 #include <GL/glut.h>
 #include <math.h>
-#include <iostream>
+#include <string.h>
 
-// Screen dimensions
-int width = 1200;
-int height = 700;
+// অ্যানিমেশন ও দিন-রাতের ভেরিয়েবল
+float busMove = -300.0f;
+float wheelAngle = 0.0f;
+float cloudMove1 = 0.0f;
+float cloudMove2 = 0.0f;
+float timeCycle = 0.0f;
+float darkness = 0.0f;
 
-// Function to draw a single pixel
-void drawPixel(int x, int y) {
-    glBegin(GL_POINTS);
-    glVertex2i(x, y);
+// কালার ইন্টারপোলেশন
+void setColorInterpolated(float r1, float g1, float b1, float r2, float g2, float b2, float t) {
+    glColor3f(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t);
+}
+void setColorInterpolatedAlpha(float r1, float g1, float b1, float a1, float r2, float g2, float b2, float a2, float t) {
+    glColor4f(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t, a1 + (a2 - a1) * t);
+}
+
+// বেসিক শেপ
+void drawCircle(float cx, float cy, float r, int num_segments) {
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < num_segments; i++) {
+        float theta = 2.0f * 3.1415926f * float(i) / float(num_segments);
+        glVertex2f(r * cosf(theta) + cx, r * sinf(theta) + cy);
+    }
     glEnd();
 }
 
-// -------------------------------------------------------
-// 1. DDA Line Drawing Algorithm (Used for filling and gradients)
-// -------------------------------------------------------
-void DDA(int x1, int y1, int x2, int y2) {
-    float dx = x2 - x1;
-    float dy = y2 - y1;
-    float steps;
+void drawRect(float x, float y, float w, float h) {
+    glBegin(GL_QUADS);
+    glVertex2f(x, y); glVertex2f(x + w, y);
+    glVertex2f(x + w, y + h); glVertex2f(x, y + h);
+    glEnd();
+}
 
-    if (abs(dx) > abs(dy))
-        steps = abs(dx);
-    else
-        steps = abs(dy);
+void drawGradientRect(float x, float y, float w, float h, float r1, float g1, float b1, float r2, float g2, float b2) {
+    glBegin(GL_QUADS);
+    glColor3f(r1, g1, b1); glVertex2f(x, y + h); glVertex2f(x + w, y + h);
+    glColor3f(r2, g2, b2); glVertex2f(x + w, y); glVertex2f(x, y);
+    glEnd();
+}
 
-    float Xinc = dx / steps;
-    float Yinc = dy / steps;
+void drawText(float x, float y, const char* text, void* font) {
+    glRasterPos2f(x, y);
+    for (int i = 0; i < strlen(text); i++) glutBitmapCharacter(font, text[i]);
+}
 
-    float x = x1;
-    float y = y1;
+// আকাশ, তারা, সূর্য, চাঁদ ও মেঘ
+void drawSky() {
+    glBegin(GL_QUADS);
+    setColorInterpolated(0.15f, 0.5f, 0.85f, 0.05f, 0.05f, 0.12f, darkness);
+    glVertex2f(0.0f, 900.0f); glVertex2f(1600.0f, 900.0f);
+    setColorInterpolated(0.85f, 0.95f, 0.8f, 0.1f, 0.05f, 0.2f, darkness);
+    glVertex2f(1600.0f, 150.0f); glVertex2f(0.0f, 150.0f);
+    glEnd();
+}
 
-    for (int i = 0; i <= steps; i++) {
-        drawPixel(round(x), round(y));
-        x += Xinc;
-        y += Yinc;
+void drawStars() {
+    if (darkness > 0.5f) {
+        glColor4f(1.0f, 1.0f, 1.0f, (darkness - 0.5f) * 2.0f);
+        glPointSize(2.0f); glBegin(GL_POINTS);
+        glVertex2f(200, 800); glVertex2f(500, 750); glVertex2f(800, 850); glVertex2f(1100, 700);
+        glVertex2f(1400, 820); glVertex2f(350, 650); glVertex2f(950, 680); glVertex2f(1250, 780);
+        glVertex2f(150, 720); glVertex2f(1500, 650); glVertex2f(600, 820); glVertex2f(1350, 740);
+        glEnd();
     }
 }
 
-// -------------------------------------------------------
-// 2. Bresenham Line Drawing Algorithm (Used for outlines and details)
-// -------------------------------------------------------
-void Bresenham(int x1, int y1, int x2, int y2) {
-    int dx = abs(x2 - x1);
-    int dy = abs(y2 - y1);
-    int sx = (x1 < x2) ? 1 : -1;
-    int sy = (y1 < y2) ? 1 : -1;
-    int err = dx - dy;
+void drawSunMoonClouds() {
+    float sunY = 780.0f - (darkness * 400.0f);
+    float moonY = 380.0f + (darkness * 400.0f);
 
-    while (true) {
-        drawPixel(x1, y1);
-        if (x1 == x2 && y1 == y2) break;
-        int e2 = 2 * err;
-        if (e2 > -dy) { err -= dy; x1 += sx; }
-        if (e2 < dx) { err += dx; y1 += sy; }
+    // সূর্যের গ্লো এবং বডি
+    if (darkness < 0.9f) {
+        glColor4f(1.0f, 0.85f, 0.3f, (1.0f - darkness) * 0.4f); drawCircle(950.0f, sunY, 80.0f, 100);
+        glColor4f(0.98f, 0.8f, 0.2f, 1.0f - darkness); drawCircle(950.0f, sunY, 55.0f, 100);
+    }
+    // চাঁদের গ্লো এবং বডি
+    if (darkness > 0.1f) {
+        glColor4f(0.9f, 0.9f, 1.0f, darkness * 0.3f); drawCircle(300.0f, moonY, 65.0f, 100);
+        glColor4f(0.9f, 0.9f, 0.95f, darkness); drawCircle(300.0f, moonY, 45.0f, 100);
+        glColor4f(0.8f, 0.8f, 0.85f, darkness); drawCircle(315.0f, moonY + 10.0f, 10.0f, 30); drawCircle(290.0f, moonY - 15.0f, 8.0f, 30);
+    }
+
+    // মেঘ
+    setColorInterpolated(1.0f, 1.0f, 1.0f, 0.25f, 0.25f, 0.3f, darkness);
+    glPushMatrix(); glTranslatef(cloudMove1, 0.0f, 0.0f);
+    drawCircle(1100.0f, 800.0f, 45.0f, 50); drawCircle(1170.0f, 830.0f, 60.0f, 50); drawCircle(1240.0f, 800.0f, 45.0f, 50); drawRect(1100.0f, 755.0f, 140.0f, 45.0f);
+    glPopMatrix();
+
+    glPushMatrix(); glTranslatef(cloudMove2, 0.0f, 0.0f);
+    drawCircle(600.0f, 720.0f, 40.0f, 50); drawCircle(660.0f, 750.0f, 55.0f, 50); drawCircle(720.0f, 720.0f, 40.0f, 50); drawRect(600.0f, 680.0f, 120.0f, 40.0f);
+    glPopMatrix();
+}
+
+// ক্লিন এবং মডার্ন মেইন বিল্ডিং
+void drawPremiumBuildings() {
+    // =====================================
+    // 1. DIU MAIN TOWER
+    // =====================================
+    setColorInterpolated(0.85f, 0.88f, 0.9f, 0.2f, 0.25f, 0.3f, darkness); drawRect(120.0f, 150.0f, 220.0f, 450.0f);
+    setColorInterpolated(0.6f, 0.65f, 0.7f, 0.1f, 0.15f, 0.2f, darkness); drawRect(340.0f, 150.0f, 40.0f, 450.0f); // Depth
+
+    // ক্লিন গ্লাস প্যানেল
+    if(darkness > 0.6f) drawGradientRect(140.0f, 170.0f, 180.0f, 410.0f, 1.0f, 0.9f, 0.6f, 0.8f, 0.6f, 0.2f);
+    else drawGradientRect(140.0f, 170.0f, 180.0f, 410.0f, 0.4f, 0.7f, 0.9f, 0.2f, 0.4f, 0.6f);
+
+    // ভার্টিকাল ডিভাইডার
+    setColorInterpolated(0.85f, 0.88f, 0.9f, 0.2f, 0.25f, 0.3f, darkness);
+    drawRect(220.0f, 170.0f, 20.0f, 410.0f);
+
+    // DIU Sign
+    drawRect(160.0f, 620.0f, 140.0f, 45.0f); // Sign base
+    if (darkness > 0.5f) glColor3f(0.0f, 1.0f, 1.0f); else glColor3f(0.1f, 0.3f, 0.7f);
+    drawText(200.0f, 635.0f, "D I U", GLUT_BITMAP_HELVETICA_18);
+
+    // =====================================
+    // 2. FOOD COURT PAVILION
+    // =====================================
+    setColorInterpolated(0.95f, 0.9f, 0.85f, 0.25f, 0.25f, 0.25f, darkness); drawRect(450.0f, 150.0f, 280.0f, 220.0f);
+    setColorInterpolated(0.8f, 0.4f, 0.2f, 0.4f, 0.15f, 0.15f, darkness);
+    glBegin(GL_POLYGON); glVertex2f(430.0f, 370.0f); glVertex2f(750.0f, 370.0f); glVertex2f(720.0f, 430.0f); glVertex2f(460.0f, 430.0f); glEnd(); // ছাদ
+
+    // সলিড ক্লিন গ্লাস
+    if(darkness > 0.6f) drawGradientRect(470.0f, 170.0f, 240.0f, 180.0f, 1.0f, 0.85f, 0.5f, 0.7f, 0.5f, 0.2f);
+    else drawGradientRect(470.0f, 170.0f, 240.0f, 180.0f, 0.5f, 0.8f, 0.95f, 0.2f, 0.5f, 0.7f);
+
+    // Food Court Glowing Sign
+    if(darkness > 0.5f) glColor3f(1.0f, 0.6f, 0.0f); else glColor3f(0.8f, 0.3f, 0.1f);
+    drawRect(520.0f, 385.0f, 140.0f, 30.0f);
+    glColor3f(1.0f, 1.0f, 1.0f); drawText(535.0f, 395.0f, "FOOD COURT", GLUT_BITMAP_HELVETICA_12);
+
+    // =====================================
+    // 3. PREMIUM HITECH HOSPITAL (NEW LOOK)
+    // =====================================
+    // মেইন বডি (Smooth Light Gray)
+    setColorInterpolated(0.9f, 0.92f, 0.95f, 0.2f, 0.25f, 0.3f, darkness);
+    drawRect(800.0f, 150.0f, 260.0f, 450.0f);
+
+    // সাইড ডেপথ (Side Shadow)
+    setColorInterpolated(0.7f, 0.75f, 0.8f, 0.15f, 0.18f, 0.2f, darkness);
+    drawRect(1060.0f, 150.0f, 40.0f, 450.0f);
+
+    // সেন্ট্রাল গ্লাস ওয়াল (বিশাল মডার্ন জানালা)
+    if(darkness > 0.6f) drawGradientRect(830.0f, 150.0f, 130.0f, 400.0f, 0.0f, 0.5f, 0.8f, 0.0f, 0.2f, 0.4f); // Glowing Blue
+    else drawGradientRect(830.0f, 150.0f, 130.0f, 400.0f, 0.3f, 0.6f, 0.8f, 0.1f, 0.3f, 0.5f);
+
+    // গ্লাসের ওপর ফ্লোর ডিভাইডার
+    setColorInterpolated(0.8f, 0.82f, 0.85f, 0.15f, 0.2f, 0.25f, darkness);
+    for(int y = 200; y < 550; y += 50) {
+        drawRect(830.0f, (float)y, 130.0f, 6.0f);
+    }
+
+    // ডান পাশের ছোট জানালাগুলো
+    for(int y = 180; y < 550; y += 60) {
+        if(darkness > 0.6f && y%120 == 0) drawGradientRect(980.0f, y, 60.0f, 30.0f, 1.0f, 0.9f, 0.6f, 0.8f, 0.5f, 0.2f);
+        else drawGradientRect(980.0f, y, 60.0f, 30.0f, 0.3f, 0.5f, 0.7f, 0.1f, 0.2f, 0.3f);
+    }
+
+    // মডার্ন টপ ওভারহ্যাং / হেলিপ্যাড এরিয়া
+    setColorInterpolated(0.6f, 0.65f, 0.7f, 0.15f, 0.2f, 0.25f, darkness);
+    drawRect(780.0f, 600.0f, 340.0f, 20.0f);
+    if(darkness > 0.5f) { glColor3f(1.0f, 0.0f, 0.0f); drawCircle(790.0f, 625.0f, 5.0f, 20); drawCircle(1110.0f, 625.0f, 5.0f, 20); } // Blinking safety lights
+
+    // প্রিমিয়াম গ্লাস বক্স (রেড ক্রসের জন্য)
+    if(darkness > 0.6f) glColor4f(0.8f, 0.9f, 1.0f, 0.8f); else glColor3f(0.7f, 0.8f, 0.9f);
+    drawRect(845.0f, 460.0f, 100.0f, 100.0f);
+
+    // রেড ক্রস (+)
+    float glow = darkness > 0.6f ? 1.0f : 0.8f;
+    glColor4f(glow, 0.1f, 0.1f, 1.0f);
+    drawRect(885.0f, 480.0f, 20.0f, 60.0f); // Vertical
+    drawRect(865.0f, 500.0f, 60.0f, 20.0f); // Horizontal
+
+    // Hospital Sign (Modern Layout)
+    if (darkness > 0.5f) glColor3f(0.0f, 0.8f, 1.0f); else glColor3f(0.1f, 0.3f, 0.6f);
+    drawRect(850.0f, 570.0f, 160.0f, 30.0f); // Sign base
+    glColor3f(1.0f, 1.0f, 1.0f); drawText(860.0f, 580.0f, "HITECH HOSPITAL", GLUT_BITMAP_HELVETICA_12);
+
+    // =====================================
+    // 4. TECH TOWER (Rightmost Skyscraper)
+    // =====================================
+    setColorInterpolated(0.25f, 0.3f, 0.35f, 0.1f, 0.1f, 0.15f, darkness); drawRect(1180.0f, 150.0f, 200.0f, 580.0f);
+    // সলিড গ্লোয়িং বডি (লাইনের বদলে)
+    if(darkness > 0.6f) drawGradientRect(1200.0f, 150.0f, 160.0f, 580.0f, 0.0f, 0.8f, 1.0f, 0.0f, 0.2f, 0.5f);
+    else drawGradientRect(1200.0f, 150.0f, 160.0f, 580.0f, 0.3f, 0.5f, 0.7f, 0.1f, 0.2f, 0.4f);
+
+    // অ্যান্টেনা
+    setColorInterpolated(0.5f, 0.5f, 0.5f, 0.3f, 0.3f, 0.3f, darkness); drawRect(1270.0f, 730.0f, 15.0f, 120.0f);
+    if(darkness > 0.5f) { glColor4f(1.0f, 0.0f, 0.0f, 0.5f); drawCircle(1277.0f, 850.0f, 15.0f, 20); } // Red Glow
+    if(darkness > 0.5f) glColor3f(1.0f, 0.0f, 0.0f); else glColor3f(0.4f, 0.0f, 0.0f);
+    drawCircle(1277.0f, 850.0f, 6.0f, 20); // Bulb
+}
+
+// ল্যাম্পপোস্ট এবং লাইট কোন (Light Cone)
+void drawStreetLights() {
+    for(int x = 150; x < 1500; x += 350) {
+        // খুঁটি এবং মাথা
+        setColorInterpolated(0.35f, 0.35f, 0.35f, 0.15f, 0.15f, 0.15f, darkness);
+        drawRect(x - 4.0f, 150.0f, 8.0f, 140.0f);
+        setColorInterpolated(0.7f, 0.7f, 0.7f, 0.3f, 0.3f, 0.3f, darkness);
+        drawRect(x - 20.0f, 290.0f, 40.0f, 10.0f);
+
+        // রাতে আলো জ্বলবে এবং রাস্তার ওপর লাইট কোন (Light cone) পড়বে
+        if (darkness > 0.6f) {
+            glColor4f(1.0f, 1.0f, 0.8f, 1.0f); drawCircle(x, 285.0f, 8.0f, 20); // বাল্ব
+            glColor4f(1.0f, 0.9f, 0.4f, 0.6f); drawCircle(x, 285.0f, 25.0f, 30); // আভা
+
+            // রাস্তার ওপর আলোর রশ্মি
+            glColor4f(1.0f, 0.9f, 0.4f, 0.2f);
+            glBegin(GL_POLYGON);
+            glVertex2f(x - 10.0f, 285.0f); glVertex2f(x + 10.0f, 285.0f);
+            glVertex2f(x + 80.0f, 100.0f); glVertex2f(x - 80.0f, 100.0f);
+            glEnd();
+        }
     }
 }
 
-// Helper function to draw a filled rectangle using DDA
-void drawFilledRect(int x1, int y1, int x2, int y2, float r, float g, float b) {
-    glColor3f(r, g, b);
-    for(int i = y1; i <= y2; i++) {
-        DDA(x1, i, x2, i);
+// রাস্তা এবং ফুটপাত
+void drawRoad() {
+    setColorInterpolated(0.3f, 0.7f, 0.4f, 0.15f, 0.25f, 0.15f, darkness); drawRect(0.0f, 130.0f, 1600.0f, 20.0f);
+    setColorInterpolated(0.6f, 0.6f, 0.6f, 0.2f, 0.2f, 0.2f, darkness); drawRect(0.0f, 120.0f, 1600.0f, 10.0f);
+    setColorInterpolated(0.2f, 0.2f, 0.2f, 0.05f, 0.05f, 0.05f, darkness); drawRect(0.0f, 0.0f, 1600.0f, 120.0f);
+    setColorInterpolated(1.0f, 1.0f, 1.0f, 0.4f, 0.4f, 0.4f, darkness); for(int i = 0; i < 1600; i += 120) drawRect((float)i, 55.0f, 60.0f, 6.0f);
+}
+
+// চাকা
+void drawWheel(float x, float y) {
+    glPushMatrix(); glTranslatef(x, y, 0.0f); glRotatef(wheelAngle, 0.0f, 0.0f, 1.0f);
+    glColor3f(0.05f, 0.05f, 0.05f); drawCircle(0.0f, 0.0f, 22.0f, 40); // টায়ার
+    glColor3f(0.85f, 0.85f, 0.85f); drawCircle(0.0f, 0.0f, 14.0f, 30); // সিলভার রিম
+    glColor3f(0.2f, 0.2f, 0.2f);
+    for(int i = 0; i < 360; i += 60) {
+        glPushMatrix(); glRotatef(i, 0, 0, 1); drawRect(-3.0f, 0.0f, 6.0f, 14.0f); glPopMatrix();
     }
+    glColor3f(0.0f, 0.8f, 1.0f); drawCircle(0.0f, 0.0f, 5.0f, 20); // সায়ান হাব (EV লুক)
+    glPopMatrix();
 }
 
-// Helper function to draw rectangle outline using Bresenham
-void drawRectOutline(int x1, int y1, int x2, int y2, float r, float g, float b) {
-    glColor3f(r, g, b);
-    Bresenham(x1, y1, x2, y1); // Bottom
-    Bresenham(x2, y1, x2, y2); // Right
-    Bresenham(x2, y2, x1, y2); // Top
-    Bresenham(x1, y2, x1, y1); // Left
+// সাইবার/মডার্ন EV বাস (ক্লিন ডিজাইন)
+void drawBus() {
+    glPushMatrix(); glTranslatef(busMove, 0.0f, 0.0f);
+
+    // মেইন বডি (ডার্ক গ্রে/সিলভার ট্রানজিশন)
+    setColorInterpolated(0.3f, 0.35f, 0.4f, 0.15f, 0.15f, 0.2f, darkness); drawRect(100.0f, 30.0f, 260.0f, 90.0f);
+
+    // আল্ট্রা-মডার্ন প্যানোরামিক উইন্ডো (স্লিক ব্ল্যাক/ব্লু গ্লাস)
+    if(darkness > 0.6f) drawGradientRect(110.0f, 65.0f, 240.0f, 40.0f, 0.8f, 0.8f, 0.6f, 0.9f, 0.9f, 0.3f);
+    else drawGradientRect(110.0f, 65.0f, 240.0f, 40.0f, 0.1f, 0.15f, 0.2f, 0.2f, 0.3f, 0.4f);
+
+    // EV Neon Strip (বাসের নিচে জ্বলজ্বল করা দাগ)
+    if(darkness > 0.4f) glColor3f(0.0f, 1.0f, 0.8f); else glColor3f(0.0f, 0.6f, 0.5f);
+    drawRect(100.0f, 55.0f, 260.0f, 4.0f);
+
+    // হেডলাইট এবং বিম
+    if(darkness > 0.6f) {
+        glColor4f(1.0f, 1.0f, 0.8f, 0.6f); glBegin(GL_POLYGON);
+        glVertex2f(360.0f, 55.0f); glVertex2f(800.0f, 10.0f); glVertex2f(800.0f, 90.0f); glVertex2f(360.0f, 65.0f); glEnd();
+        glColor3f(1.0f, 1.0f, 1.0f);
+    } else glColor3f(0.9f, 0.9f, 0.9f);
+    drawRect(355.0f, 45.0f, 5.0f, 25.0f); // Headlight LED
+
+    // চাকা
+    drawWheel(160.0f, 30.0f); drawWheel(300.0f, 30.0f);
+    glPopMatrix();
 }
 
-// -------------------------------------------------------
-// 3. Midpoint Circle Algorithm
-// -------------------------------------------------------
-void MidpointCircle(int xc, int yc, int r) {
-    int x = 0, y = r;
-    int d = 3 - 2 * r;
-    while (x <= y) {
-        drawPixel(xc + x, yc + y); drawPixel(xc - x, yc + y);
-        drawPixel(xc + x, yc - y); drawPixel(xc - x, yc - y);
-        drawPixel(xc + y, yc + x); drawPixel(xc - y, yc + x);
-        drawPixel(xc + y, yc - x); drawPixel(xc - y, yc - x);
-        if (d < 0) d += 4 * x + 6;
-        else { d += 4 * (x - y) + 10; y--; }
-        x++;
-    }
-}
-
-// Helper function to draw a filled circle
-void drawFilledCircle(int xc, int yc, int r, float red, float green, float blue) {
-    glColor3f(red, green, blue);
-    for(int i = 0; i <= r; i++) {
-        MidpointCircle(xc, yc, i);
-    }
-}
-
-// Function to draw the sky gradient
-void drawSkyGradient() {
-    for (int y = 150; y <= height; y++) {
-        // Interpolation: Blue at top, whitish towards horizon
-        float ratio = (float)(y - 150) / (height - 150);
-        float r = 0.529 + ratio * (0.8 - 0.529);
-        float g = 0.808 + ratio * (0.9 - 0.808);
-        float b = 0.922 + ratio * (1.0 - 0.922);
-        glColor3f(r, g, b);
-        DDA(0, y, width, y);
-    }
-}
-
-
-// -------------------------------------------------------
-// Main Display Function
-// -------------------------------------------------------
 void display() {
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // 1. Sky (Gradient)
-    drawSkyGradient();
+    drawSky();
+    drawStars();
+    drawSunMoonClouds();
 
-    // 2. Sun (Rays removed)
-    drawFilledCircle(900, 600, 40, 1.0, 0.8, 0.0); // Yellow Sun
+    drawPremiumBuildings(); // পেছনের বিল্ডিং রিমুভ করা হয়েছে
+    drawStreetLights();
+    drawRoad();
+    drawBus();
 
-    // 3. Clouds (with shadow effect)
-    drawFilledCircle(200, 580, 30, 0.9, 0.9, 0.9); // Shadow
-    drawFilledCircle(240, 590, 35, 0.9, 0.9, 0.9);
-    drawFilledCircle(280, 580, 30, 0.9, 0.9, 0.9);
-    drawFilledCircle(200, 600, 30, 1.0, 1.0, 1.0); // Main Cloud
-    drawFilledCircle(240, 610, 35, 1.0, 1.0, 1.0);
-    drawFilledCircle(280, 600, 30, 1.0, 1.0, 1.0);
+    if(darkness > 0.5f) glColor3f(1.0f, 1.0f, 1.0f); else glColor3f(0.2f, 0.2f, 0.2f);
+    drawText(650.0f, 860.0f, "ULTRA CLEAN HITECH CITY", GLUT_BITMAP_HELVETICA_18);
 
+    glutSwapBuffers();
+}
 
-    // 4. Ground and Road
-    // Grass gradient
-    for(int y=120; y<150; y++) {
-         float ratio = (float)(y - 120) / 30.0;
-         glColor3f(0.1 + ratio*0.1, 0.6 + ratio*0.1, 0.1 + ratio*0.1);
-         DDA(0, y, width, y);
-    }
-    drawFilledRect(0, 0, 1200, 120, 0.3, 0.3, 0.3); // Road
-    // Road dividers (White stripes)
-    glColor3f(1.0, 1.0, 1.0);
-    for(int i=50; i<1200; i+=120) {
-        drawFilledRect(i, 55, i+60, 65, 1.0, 1.0, 1.0);
-    }
+void timer(int value) {
+    busMove += 6.0f; wheelAngle -= 12.0f;
+    if(busMove > 1700.0f) busMove = -400.0f;
+    cloudMove1 += 0.5f; if(cloudMove1 > 600.0f) cloudMove1 = -1600.0f;
+    cloudMove2 += 0.3f; if(cloudMove2 > 1000.0f) cloudMove2 = -800.0f;
 
+    timeCycle += 0.005f;
+    darkness = (sin(timeCycle) + 1.0f) / 2.0f;
 
-    // 5. Building - 1 (DIU - Left)
-    drawFilledRect(50, 120, 220, 500, 0.7, 0.5, 0.5); // Main Body
-    drawRectOutline(50, 120, 220, 500, 0.4, 0.3, 0.3); // Outline
-    // Windows
-    for(int y=140; y<480; y+=60) {
-        drawFilledRect(70, y, 120, y+40, 0.8, 0.8, 0.9); // Glass
-        drawRectOutline(70, y, 120, y+40, 0.5, 0.5, 0.6); // Frame
-        drawFilledRect(140, y, 190, y+40, 0.8, 0.8, 0.9);
-        drawRectOutline(140, y, 190, y+40, 0.5, 0.5, 0.6);
-    }
-    // DIU Text (Using lines)
-    glColor3f(0.9, 0.9, 1.0); Bresenham(50, 450, 220, 450); // Strip
-    glColor3f(0.0, 0.0, 0.6); // Dark Blue Text
-    Bresenham(100, 460, 100, 490); Bresenham(100, 460, 115, 475); Bresenham(115, 475, 100, 490); // D
-    Bresenham(130, 460, 130, 490); // I
-    Bresenham(145, 460, 145, 490); Bresenham(145, 460, 160, 460); Bresenham(160, 460, 160, 490); // U
-
-    // 6. Building - 2 (Food Court - Middle)
-    drawFilledRect(400, 120, 650, 350, 0.8, 0.7, 0.4); // Body
-    drawRectOutline(400, 120, 650, 350, 0.5, 0.4, 0.2);
-    drawFilledRect(390, 350, 660, 380, 0.4, 0.2, 0.1); // Roof
-    // Large Glass Windows
-    drawFilledRect(420, 140, 630, 300, 0.6, 0.8, 1.0);
-    drawRectOutline(420, 140, 630, 300, 0.3, 0.5, 0.7);
-    // Grill/Frames on glass
-    glColor3f(0.3, 0.5, 0.7);
-    Bresenham(525, 140, 525, 300); // Vertical middle line
-    Bresenham(420, 220, 630, 220); // Horizontal middle line
-
-    // 7. Building - 3 (Hospital - Right)
-    drawFilledRect(850, 120, 1050, 550, 0.85, 0.9, 0.95); // Body (Whitish)
-    drawRectOutline(850, 120, 1050, 550, 0.6, 0.7, 0.7);
-    // Windows
-    for(int y=150; y<480; y+=50) {
-        drawFilledRect(870, y, 940, y+30, 0.6, 0.7, 0.8);
-        drawFilledRect(960, y, 1030, y+30, 0.6, 0.7, 0.8);
-    }
-    // --- Hospital Plus Sign (+) ---
-    glColor3f(0.9, 0.0, 0.0); // Bright Red
-    // Drawn with multiple Bresenham lines for thickness
-    // Horizontal Bar (-)
-    Bresenham(930, 515, 970, 515);
-    Bresenham(930, 516, 970, 516);
-    Bresenham(930, 517, 970, 517);
-    // Vertical Bar (|)
-    Bresenham(950, 495, 950, 535);
-    Bresenham(951, 495, 951, 535);
-    Bresenham(949, 495, 949, 535);
-
-
-    // 8. Trees (Bushy)
-    int treeX = 1100, treeY = 200;
-    drawFilledRect(treeX, 120, treeX+20, treeY, 0.4, 0.2, 0.1); // Trunk
-    // Leaves (Overlapping circles)
-    drawFilledCircle(treeX+10, treeY+20, 40, 0.0, 0.5, 0.0);
-    drawFilledCircle(treeX-15, treeY+10, 35, 0.0, 0.55, 0.0);
-    drawFilledCircle(treeX+35, treeY+10, 35, 0.0, 0.45, 0.0);
-    drawFilledCircle(treeX+10, treeY+50, 30, 0.1, 0.6, 0.1);
-
-
-    // 9. Bus
-    int busX = 650, busY = 40;
-    drawFilledRect(busX, busY, busX+180, busY+80, 0.9, 0.1, 0.1); // Body
-    drawRectOutline(busX, busY, busX+180, busY+80, 0.6, 0.0, 0.0);
-    // Windows
-    drawFilledRect(busX+10, busY+40, busX+50, busY+70, 0.7, 0.8, 0.9);
-    drawFilledRect(busX+60, busY+40, busX+110, busY+70, 0.7, 0.8, 0.9);
-    drawFilledRect(busX+120, busY+40, busX+170, busY+70, 0.7, 0.8, 0.9);
-    // Wheels
-    drawFilledCircle(busX+30, busY, 18, 0.1, 0.1, 0.1);
-    drawFilledCircle(busX+150, busY, 18, 0.1, 0.1, 0.1);
-    drawFilledCircle(busX+30, busY, 8, 0.6, 0.6, 0.6); // Rims
-    drawFilledCircle(busX+150, busY, 8, 0.6, 0.6, 0.6);
-
-    glFlush();
+    glutPostRedisplay();
+    glutTimerFunc(16, timer, 0);
 }
 
 void init() {
-    glClearColor(1.0, 1.0, 1.0, 0.0);
+    glClearColor(1.0, 1.0, 1.0, 1.0);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluOrtho2D(0.0, width, 0.0, height);
+    gluOrtho2D(0.0, 1600.0, 0.0, 900.0);
 }
 
 int main(int argc, char** argv) {
     glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
-    glutInitWindowSize(width, height);
-    glutInitWindowPosition(50, 50);
-    glutCreateWindow("Hitech City Final - Joyassroy Barua");
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_MULTISAMPLE);
+    glutInitWindowSize(1200, 675);
+    glutCreateWindow("Ultra Clean Hitech City");
+
     init();
     glutDisplayFunc(display);
+    glutTimerFunc(0, timer, 0);
+
     glutMainLoop();
     return 0;
 }
